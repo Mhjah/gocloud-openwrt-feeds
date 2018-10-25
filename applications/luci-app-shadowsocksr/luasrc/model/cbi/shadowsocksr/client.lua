@@ -1,4 +1,5 @@
 -- Copyright (C) 2017 yushi studio <ywb94@qq.com> github.com/ywb94
+-- Copyright (C) 2018 lean <coolsnowwolf@gmail.com> github.com/coolsnowwolf
 -- Licensed to the public under the GNU General Public License v3.
 
 local m, s, sec, o, kcp_enable
@@ -14,12 +15,6 @@ end
 
 local function has_udp_relay()
     return luci.sys.call("lsmod | grep -q TPROXY && command -v ip >/dev/null") == 0
-end
-
-local gfwmode = 0
-
-if nixio.fs.access("/etc/dnsmasq.ssr/gfw_list.conf") then
-    gfwmode = 1
 end
 
 local tabname = {translate("Client"), translate("Status")};
@@ -208,36 +203,43 @@ o.datatype = "uinteger"
 o:depends("enable_switch", "1")
 o.default = 3
 
-if gfwmode == 0 then
-    o = s:taboption("base", Flag, "tunnel_enable", translate("Enable Tunnel (DNS)"))
-    o.default = 0
-    o.rmempty = false
-    
-    o = s:taboption("base", Value, "tunnel_port", translate("Tunnel Port"))
-    o.datatype = "port"
-    o.default = 5300
-    o.rmempty = false
-else
-    o = s:taboption("base", ListValue, "gfw_enable", translate("Operating mode"))
-    o:value("router", translate("IP Route Mode"))
-    o:value("gfw", translate("GFW List Mode"))
-    o.rmempty = false
-
-    o = s:taboption("base", DynamicList, "gfw_list", translate("Optional GFW domains"))
-    o:depends("gfw_enable", "gfw")
-    o.datatype = "hostname"
-    
-    o = s:taboption("base", ListValue, "pdnsd_enable", translate("DNS Mode"))
-    o:value("0", translate("Use DNS Tunnel"))
-    if has_bin("pdnsd") then
-        o:value("1", translate("Use pdnsd"))
-    end
-    o.rmempty = false
-end
-
-o = s:taboption("base", Value, "tunnel_forward", translate("DNS Server IP and Port"))
-o.default = "8.8.4.4:53"
+o = s:taboption("base", ListValue, "run_mode", translate("Operating mode"))
+o:value("router", translate("IP Route Mode"))
+o:value("gfw", translate("GFW List Mode"))
 o.rmempty = false
+
+o = s:taboption("base", Flag, "tunnel_enable", translate("Enable Tunnel (DNS)"))
+o:depends("run_mode", "router")
+o.default = 0
+
+o = s:taboption("base", Value, "tunnel_port", translate("Tunnel Port"))
+o:depends("run_mode", "router")
+o.datatype = "port"
+o.default = 5300
+
+o = s:taboption("base", DynamicList, "gfw_list", translate("Optional GFW domains"))
+o:depends("run_mode", "gfw")
+o.datatype = "hostname"
+
+o = s:taboption("base", ListValue, "pdnsd_enable", translate("DNS Mode"))
+o:value("0", translate("Use DNS Tunnel"))
+if has_bin("pdnsd") then
+    o:value("1", translate("Use pdnsd"))
+end
+o.rmempty = false
+
+o = s:taboption("base", ListValue, "tunnel_forward", translate("Upstream DNS Server"))
+o:value("8.8.4.4:53", translate("Google Public DNS (8.8.4.4)"))
+o:value("8.8.8.8:53", translate("Google Public DNS (8.8.8.8)"))
+o:value("208.67.222.222:53", translate("OpenDNS (208.67.222.222)"))
+o:value("208.67.220.220:53", translate("OpenDNS (208.67.220.220)"))
+o:value("209.244.0.3:53", translate("Level 3 Public DNS (209.244.0.3)"))
+o:value("209.244.0.4:53", translate("Level 3 Public DNS (209.244.0.4)"))
+o:value("4.2.2.1:53", translate("Level 3 Public DNS (4.2.2.1)"))
+o:value("4.2.2.2:53", translate("Level 3 Public DNS (4.2.2.2)"))
+o:value("4.2.2.3:53", translate("Level 3 Public DNS (4.2.2.3)"))
+o:value("4.2.2.4:53", translate("Level 3 Public DNS (4.2.2.4)"))
+o:value("1.1.1.1:53", translate("Cloudflare DNS (1.1.1.1)"))
 
 if has_bin("ssr-subscribe") and has_bin("bash") then
     s:tab("subscribe", translate("Server Subscription"))
@@ -289,7 +291,6 @@ s:tab("wan_ac", translate("Interfaces - WAN"))
 
 o = s:taboption("wan_ac", Value, "wan_bp_list", translate("Bypassed IP List"))
 o:value("/dev/null", translate("NULL - As Global Proxy"))
-
 o.default = "/dev/null"
 o.rmempty = false
 
