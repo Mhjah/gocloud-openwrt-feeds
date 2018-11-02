@@ -32,8 +32,6 @@ switch_server=$1
 gfwlist_update_url="https://raw.githubusercontent.com/gfwlist/gfwlist/master/gfwlist.txt"
 china_ip_update_url="http://ftp.apnic.net/apnic/stats/apnic/delegated-apnic-latest"
 
-alias 'curl=curl --capath /etc/ssl/certs --connect-timeout 3'
-
 uci_get_by_name() {
 	local ret=$(uci get $NAME.$1.$2 2>/dev/null)
 	echo ${ret:=$3}
@@ -134,7 +132,7 @@ start_rules() {
 	kcp_server=$server
 
 	local kcp_enable=$(uci_get_by_name $GLOBAL_SERVER kcp_enable)
-	if [ $kcp_enable = "1" ]; then
+	if [ "$kcp_enable" = "1" ]; then
 		kcp_flag=1
 	fi
 
@@ -172,8 +170,6 @@ start_rules() {
 		-b "$(uci_get_by_type access_control wan_bp_ips)" \
 		-w "$(uci_get_by_type access_control wan_fw_ips)" \
 		$(get_arg_out) $gfwmode $ARG_UDP
-
-	return $?
 }
 
 start_pdnsd() {
@@ -265,7 +261,7 @@ EOF
 	iptables -t nat -N HAPROXY
 
 	for server in $(uci show -X shadowsocksr | grep servers | awk -F'[.=]' '{print $2}'); do
-		local name=$(uci_get_by_name $server alias $server | sed 's/\[//g; s/\]//g; s/ /-/g')
+		local name=$(uci_get_by_name $server alias $server | sed 's/[^A-Za-z0-9_:.-]//g')
 		local host=$(uci_get_by_name $server server)
 		local port=$(uci_get_by_name $server server_port)
 		local weight=$(uci_get_by_name $server weight 10)
@@ -299,7 +295,7 @@ start_redir() {
 
 	#deal kcp
 	local kcp_enable=$(uci_get_by_name $GLOBAL_SERVER kcp_enable)
-	if [ $kcp_enable = "1" ]; then
+	if [ "$kcp_enable" = "1" ]; then
 		[ ! -f "/usr/bin/ssr-kcptun" ] && return 1
 
 		local kcp_str=$(/usr/bin/ssr-kcptun -v | grep kcptun | wc -l)
@@ -454,26 +450,25 @@ start_tunnel() {
 }
 
 start_local() {
-	local local_server=$(uci_get_by_type socks5_proxy server)
-	[ "$local_server" = "nil" ] && return 1
+	[ $(uci_get_by_type global enable_ssr_local 0) = 0 ] && return 1
+	local local_server=$(uci_get_by_type global ssr_local_server)
+	[ -z "$local_server" ] && return 1
 	mkdir -p /var/run /var/etc
 	gen_config_file $local_server 2
 	/usr/bin/ssr-local -c $CONFIG_SOCK5_FILE -u \
-		-l $(uci_get_by_type socks5_proxy local_port 1080) \
+		-l $(uci_get_by_type global ssr_local_port 1080) \
 		-f /var/run/ssr-local.pid
 	local_enable=1
 }
 
 rules() {
-	[ $(uci_get_by_type global enable) = 0 ] && return 1
+	if [ $(uci_get_by_type global enable) = 0 ] || [ -z "$GLOBAL_SERVER" ]; then
+		return 1
+	fi
 	mkdir -p /var/run /var/etc
 	UDP_RELAY_SERVER=$(uci_get_by_type global udp_relay_server)
 	[ "$UDP_RELAY_SERVER" = "same" ] && UDP_RELAY_SERVER=$GLOBAL_SERVER
-	if start_rules; then
-		return 0
-	else
-		return 1
-	fi
+	start_rules
 }
 
 cron() {
@@ -497,7 +492,7 @@ cron() {
 		gfwlist)
 			loger 6 "Updating gfwlist from $gfwlist_update_url..."
 			gfwlist_conf="/etc/dnsmasq.ssr/gfw_list.conf"
-			if curl -sLo /tmp/gfw.b64 $gfwlist_update_url && /usr/bin/ssr-gfw; then
+			if curl --connect-timeout 3 -sLo /tmp/gfw.b64 $gfwlist_update_url && /usr/bin/ssr-gfw; then
 				update_conf /tmp/gfwnew.txt $gfwlist_conf && /etc/init.d/dnsmasq restart
 				loger 6 "gfwlist update success! [$gfwlist_conf: $(cat $gfwlist_conf | wc -l) lines]"
 			else
@@ -509,7 +504,7 @@ cron() {
 		china_ip)
 			loger 6 "Updating china ip from $china_ip_update_url..."
 			china_ip_conf="/etc/china_ssr.txt"
-			if curl -sLo- $china_ip_update_url 2>/dev/null \
+			if curl --connect-timeout 3 -sLo- $china_ip_update_url 2>/dev/null \
 				| awk -F\| '/CN\|ipv4/ { printf("%s/%d\n", $4, 32-log($5)/log(2)) }' \
 				> /tmp/china_ssr.txt; then
 				update_conf /tmp/china_ssr.txt $china_ip_conf
@@ -551,8 +546,9 @@ start() {
 		GLOBAL_SERVER=$switch_server
 		switch_enable=1
 	fi
+
 	HAPROXY_MODE="0"
-	if [ $GLOBAL_SERVER = "__haproxy__" ]; then
+	if [ "$GLOBAL_SERVER" = "__haproxy__" ]; then
 		GLOBAL_SERVER=$(uci show -X shadowsocksr | grep servers | awk -F'[.=]' '{print $2}' | head -n 1)
 		HAPROXY_MODE="1"
 	fi
